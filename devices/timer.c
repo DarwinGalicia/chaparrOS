@@ -78,6 +78,8 @@ timer_ticks (void)
 
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
+
+//Devuelve el numero de ticks que han transcurrido desde que Pintos inició su ejecución.
 int64_t
 timer_elapsed (int64_t then) 
 {
@@ -86,6 +88,8 @@ timer_elapsed (int64_t then)
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
+
+// Suspende la ejecución del thread actual hasta que hayan transcurrido al menos el número de ticks recibidos como argumento.
 void
 timer_sleep (int64_t ticks) 
 {
@@ -167,6 +171,7 @@ timer_print_stats (void)
 }
 
 /* Timer interrupt handler. */
+//Es el reloj de Pintos. Cuando esta función sea llamada, la variable global ticks se incrementará en uno.
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
