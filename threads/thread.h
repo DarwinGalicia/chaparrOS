@@ -95,6 +95,10 @@ struct thread
 
 
    uint64_t TIEMPO_DORMIDO;   //entero que represente el tiempo que un thread debe permanecer dormido
+   int prioridad_original;    //prioridad original antes de que le donen
+   struct lock *esperando_lock; //Esperando lock o no 
+   struct list locks;         // Lista de threads en esperando por el lock
+
 
 
 #ifdef USERPROG
