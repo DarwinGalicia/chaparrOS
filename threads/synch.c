@@ -68,7 +68,8 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      //list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current()->elem, ordenarMayorMenor, NULL);
       thread_block ();
     }
   sema->value--;
@@ -335,4 +336,21 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+static bool ordenarMayorMenor(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux){
+    // Verificar que sea un elemento valido de la lista
+    ASSERT(a!=NULL);
+    ASSERT(b!=NULL);
+    //Recueperar los thread del elemento de la lista
+    struct thread *thread_a = list_entry(a, struct thread, elem);
+    struct thread *thread_b = list_entry(b, struct thread, elem);
+    //Comparar la prioridad si a > b entonces true
+    if(thread_a->priority > thread_b->priority){
+      return true;
+    } else {
+      return false;
+    }
 }

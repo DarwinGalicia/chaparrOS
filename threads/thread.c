@@ -261,6 +261,13 @@ thread_unblock (struct thread *t)
   list_insert_ordered(&ready_list, &t->elem,ordenarMayorMenor,NULL);
   t->status = THREAD_READY;
 
+  //verificar si el thread actual, no es el fake thread
+  if (thread_current() != idle_thread){
+      thread_yield();
+  }
+    
+  
+
   intr_set_level (old_level);
 }
 
@@ -361,7 +368,18 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  struct thread* siguienteAEjecutar;
   thread_current ()->priority = new_priority;
+
+  //el siguiente a ejecutar sera el que este en el principio de la ready_list
+  siguienteAEjecutar = list_entry(list_begin(&ready_list), struct thread, elem);
+
+  //verificamos que la prioridad sea mayor que la nueva prioridad
+
+  /*Un thread podrá incrementar o reducir su propia prioridad en cualquier momento, pero si la reduce, de manera que no sea el thread de más alta prioridad, causará que ceda inmediatamente el procesador.*/
+  if ( siguienteAEjecutar->priority > new_priority) {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */

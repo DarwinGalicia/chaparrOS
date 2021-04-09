@@ -41,6 +41,13 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
+
+/* Funcion auxiliar para ordenar la lista, comparara si la prioridad del thread 
+a es mayor a la de b, mayor prioridad en head */
+static bool ordenarMayorMenor(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux);
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an
