@@ -145,4 +145,10 @@ int thread_get_load_avg (void);
 void insertar_en_lista_espera(int64_t ticks);
 void remover_thread_durmiente(int64_t ticks);
 
+/* Funcion auxiliar para ordenar la lista, comparara si la prioridad del thread 
+a es mayor a la de b, mayor prioridad en head */
+static bool ordenarMayorMenor(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux);
+
 #endif /* threads/thread.h */
