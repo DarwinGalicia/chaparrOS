@@ -208,6 +208,14 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /*
+  Si tiene una mayor prioridad que el thread actual en ejecución, este thread en ejecución 
+  debe ceder inmediatamente  el procesador al nuevo thread.
+  */
+  if(priority>thread_current()->priority){
+    thread_yield();
+  }
+
   return tid;
 }
 
@@ -244,8 +252,15 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  /*
+   mete el thread desbloquado a la ready list y cambia el estatus a ready, 
+   como queremos ordenar ready list de acuerdo a las prioridades, usaremos
+   list_insert_ordered
+  */
+  //list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem,ordenarMayorMenor,NULL);
   t->status = THREAD_READY;
+
   intr_set_level (old_level);
 }
 
@@ -314,8 +329,12 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  // si el thread actual no es un nop
+  if (cur != idle_thread){
+    //list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, ordenarMayorMenor, NULL);
+  } 
+    
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -642,4 +661,21 @@ void remover_thread_durmiente(int64_t ticks){
 		}
 	}
   
+}
+
+static bool ordenarMayorMenor(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux){
+    // Verificar que sea un elemento valido de la lista
+    ASSERT(a!=NULL);
+    ASSERT(b!=NULL);
+    //Recueperar los thread del elemento de la lista
+    struct thread *thread_a = list_entry(a, struct thread, elem);
+    struct thread *thread_b = list_entry(b, struct thread, elem);
+    //Comparar la prioridad si a > b entonces true
+    if(thread_a->priority > thread_b->priority){
+      return true;
+    } else {
+      return false;
+    }
 }
