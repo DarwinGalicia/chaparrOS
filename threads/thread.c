@@ -371,15 +371,22 @@ thread_set_priority (int new_priority)
   struct thread* siguienteAEjecutar;
   thread_current ()->priority = new_priority;
 
-  //el siguiente a ejecutar sera el que este en el principio de la ready_list
-  siguienteAEjecutar = list_entry(list_begin(&ready_list), struct thread, elem);
+  if(!list_empty(&ready_list)){
+    //el siguiente a ejecutar sera el que este en el principio de la ready_list
+    siguienteAEjecutar = list_entry(list_begin(&ready_list), struct thread, elem);
 
-  //verificamos que la prioridad sea mayor que la nueva prioridad
+    //verificamos que la prioridad sea mayor que la nueva prioridad
 
-  /*Un thread podrá incrementar o reducir su propia prioridad en cualquier momento, pero si la reduce, de manera que no sea el thread de más alta prioridad, causará que ceda inmediatamente el procesador.*/
-  if ( siguienteAEjecutar->priority > new_priority) {
-    thread_yield();
+    /* Un thread podrá incrementar o reducir su propia prioridad en cualquier momento,
+    pero si la reduce, de manera que no sea el thread de más alta prioridad, causará 
+    que ceda inmediatamente el procesador.*/
+    if(siguienteAEjecutar != NULL){
+      if ( siguienteAEjecutar->priority > new_priority) {
+        thread_yield();
+      }
+    }
   }
+  
 }
 
 /* Returns the current thread's priority. */
@@ -506,6 +513,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->priorityOriginal = priority;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
