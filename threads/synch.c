@@ -111,14 +111,24 @@ void
 sema_up (struct semaphore *sema) 
 {
   enum intr_level old_level;
-
+  struct thread *t_unblock = NULL;
+  
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  if (!list_empty (&sema->waiters)){
+      t_unblock = list_entry (list_pop_front (&sema->waiters),
+                                struct thread, elem);
+      thread_unblock (t_unblock);
+  } 
+
+  // si el thread que se esta desbloqueando tiene prioridad mayor, al current thread, seder procesador
   sema->value++;
+  if(t_unblock != NULL){
+    if(t_unblock->priority > thread_current()->priority){
+      thread_yield();
+    }
+  }
   intr_set_level (old_level);
 }
 
@@ -180,6 +190,7 @@ lock_init (struct lock *lock)
   ASSERT (lock != NULL);
 
   lock->holder = NULL;
+  lock->priority = PRI_MIN; // se inicializa con la prioridad minima
   sema_init (&lock->semaphore, 1);
 }
 
@@ -198,19 +209,41 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
   // Se verificara la donacion al momento de solicitar el lock
-  struct thread *threadLock = lock->holder;
+  struct thread *threadLock = lock->holder; // thread que tiene el lock
   struct thread *threadActual = thread_current();
 
-  if(threadLock != NULL){
-    // Si la prioridad del thread que tiene el Lock, es menor que la del thread actual, donar
-    if(threadLock->priority < threadActual->priority){
-      threadLock->priority = threadActual->priority;
-    }
+  // el thread esperara por este lock
+  threadActual->waiting_for_lock = lock;
+
+  if(threadLock == NULL){
+    // La prioridad del lock, sera la misma que la de el thread que lo mantiene
+    lock->priority = threadActual->priority;
   }
-  
+
+  struct lock *lockActual = lock;
+  while(threadLock != NULL && threadActual->priority > threadLock->priority){
+    // mientras la prioridad del thread actual sea mayor que la del thread que tiene el lock, donar
+    threadLock->priority = threadActual->priority;
+
+    if(threadActual->priority > lockActual->priority){
+      lockActual->priority = threadActual->priority;
+    }
+
+    // si el thread que tiene el lock, ya no esta esperando por nadie, salir del ciclo
+    lockActual = threadLock->waiting_for_lock;
+    if(lockActual == NULL){
+      break;
+    } else {
+      // si esta esperando por alquien, threadLock recibe el thread que tiene el lock
+      threadLock = lockActual->holder;
+    }
+  }  
   
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+
+  lock->holder->waiting_for_lock = NULL;
+  list_insert_ordered(&(lock->holder->holding_lock), &(lock->elem_lock), ordenarMayorMenorLock, NULL);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -247,8 +280,20 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
   // Al finalizar el lock, restaurar la prioridad
+  //struct thread *threadActual = thread_current();
+  //threadActual->priority = threadActual->priorityOriginal;
+
+  // Quitar el lock de la lista de locks
+  list_remove(&lock->elem_lock);
+
   struct thread *threadActual = thread_current();
-  threadActual->priority = threadActual->priorityOriginal;
+  if(list_empty(&threadActual->holding_lock)){
+    threadActual->priority = threadActual->priorityOriginal;
+  } else {
+    struct lock *next_lock = list_entry(list_front(&(threadActual->holding_lock)), struct lock, elem_lock);
+    threadActual->priority = next_lock->priority;
+  }
+
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -364,6 +409,23 @@ static bool ordenarMayorMenor(const struct list_elem *a,
     struct thread *thread_b = list_entry(b, struct thread, elem);
     //Comparar la prioridad si a > b entonces true
     if(thread_a->priority > thread_b->priority){
+      return true;
+    } else {
+      return false;
+    }
+}
+
+static bool ordenarMayorMenorLock(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux){
+    // Verificar que sea un elemento valido de la lista
+    ASSERT(a!=NULL);
+    ASSERT(b!=NULL);
+    //Recueperar los locks del elemento de la lista
+    struct lock *lock_a = list_entry(a, struct lock, elem_lock);
+    struct lock *lock_b = list_entry(b, struct lock, elem_lock);
+    //Comparar la prioridad si a > b entonces true
+    if(lock_a->priority > lock_b->priority){
       return true;
     } else {
       return false;
