@@ -117,6 +117,8 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)){
+      // Se ordena la lista para poder desbloquear al de mayor prioridad
+      list_sort(&(sema->waiters), ordenarMayorMenor, NULL);
       t_unblock = list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem);
       thread_unblock (t_unblock);
@@ -226,7 +228,11 @@ lock_acquire (struct lock *lock)
     threadLock->priority = threadActual->priority;
 
     if(threadActual->priority > lockActual->priority){
+
       lockActual->priority = threadActual->priority;
+      // se agrega esta verificacion, para ceder el procesador
+      verificar(lockActual, threadActual->priority);
+
     }
 
     // si el thread que tiene el lock, ya no esta esperando por nadie, salir del ciclo
@@ -289,9 +295,16 @@ lock_release (struct lock *lock)
   struct thread *threadActual = thread_current();
   if(list_empty(&threadActual->holding_lock)){
     threadActual->priority = threadActual->priorityOriginal;
+    // se agrega esta verificacion, para ceder el procesador
+    verificar(threadActual, threadActual->priority);
+
   } else {
+    // se ordena la lista, para extraer el de mayor prioridad
+    list_sort(&(threadActual->holding_lock), ordenarMayorMenorLock, NULL);
     struct lock *next_lock = list_entry(list_front(&(threadActual->holding_lock)), struct lock, elem_lock);
     threadActual->priority = next_lock->priority;
+    // se agrega esta verificacion, para ceder el procesador
+      verificar(threadActual, next_lock->priority);
   }
 
 }

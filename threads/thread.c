@@ -365,10 +365,15 @@ thread_set_priority (int new_priority)
   //thread_current ()->priority = new_priority;
   
   struct thread *threadActual = thread_current();
+  // si la prioridad actual es igual a la original, no hay donacion, entonces hay que cambiar las dos
+  // si hay donacion entonces, debemos actualizar el thread actual
   if(threadActual->priority == threadActual->priorityOriginal){
     threadActual->priorityOriginal = new_priority;
+    threadActual->priority = new_priority;
+  } else {
+    threadActual->priorityOriginal = new_priority;
   }
-  threadActual->priority = new_priority;
+  
 
   if(!list_empty(&ready_list)){
     //el siguiente a ejecutar sera el que este en el principio de la ready_list
@@ -699,4 +704,28 @@ static bool ordenarMayorMenor(const struct list_elem *a,
     } else {
       return false;
     }
+}
+
+void verificar(struct thread *t, int p){
+
+  struct thread* siguienteAEjecutar;
+
+  if(t==thread_current()){
+    if(!list_empty(&ready_list)){
+      //el siguiente a ejecutar sera el que este en el principio de la ready_list
+      siguienteAEjecutar = list_entry(list_begin(&ready_list), struct thread, elem);
+
+      //verificamos que la prioridad sea mayor que la nueva prioridad
+
+      /* Un thread podrá incrementar o reducir su propia prioridad en cualquier momento,
+      pero si la reduce, de manera que no sea el thread de más alta prioridad, causará 
+      que ceda inmediatamente el procesador.*/
+      if(siguienteAEjecutar != NULL){
+        if ( siguienteAEjecutar->priority > p) {
+          thread_yield();
+        }
+      }
+    }
+  }
+  
 }

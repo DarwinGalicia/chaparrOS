@@ -154,4 +154,5 @@ static bool ordenarMayorMenor(const struct list_elem *a,
                              const struct list_elem *b,
                              void *aux);
 
+void verificar(struct thread *t, int p);
 #endif /* threads/thread.h */
