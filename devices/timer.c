@@ -98,8 +98,8 @@ timer_sleep (int64_t ticks)
   ASSERT (intr_get_level () == INTR_ON);
   /*while (timer_elapsed (start) < ticks) 
     thread_yield ();*/
-
-  insertar_en_lista_espera(ticks);
+  if(ticks > 0)
+    insertar_en_lista_espera(ticks);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
