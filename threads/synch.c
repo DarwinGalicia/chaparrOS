@@ -369,7 +369,11 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+
+  //list_push_back (&cond->waiters, &waiter.elem);
+  // ahora se inserta de manera ordenada
+  list_insert_ordered(&cond->waiters, &waiter.elem, ordenarMayorMenorSema, NULL);
+
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -439,6 +443,23 @@ static bool ordenarMayorMenorLock(const struct list_elem *a,
     struct lock *lock_b = list_entry(b, struct lock, elem_lock);
     //Comparar la prioridad si a > b entonces true
     if(lock_a->priority > lock_b->priority){
+      return true;
+    } else {
+      return false;
+    }
+}
+
+static bool ordenarMayorMenorSema(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux){
+    // Verificar que sea un elemento valido de la lista
+    ASSERT(a!=NULL);
+    ASSERT(b!=NULL);
+    //Recueperar los locks del elemento de la lista
+    struct semaphore_elem *sema_a = list_entry(a, struct semaphore_elem, elem);
+    struct semaphore_elem *sema_b = list_entry(b, struct semaphore_elem, elem);
+    //Comparar la prioridad si a > b entonces true
+    if(sema_a->semaphore.priority > sema_b->semaphore.priority){
       return true;
     } else {
       return false;

@@ -9,6 +9,7 @@ struct semaphore
   {
     unsigned value;             /* Current value. */
     struct list waiters;        /* List of waiting threads. */
+    int priority;               // Prioridad del semaforo
   };
 
 void sema_init (struct semaphore *, unsigned value);
@@ -56,6 +57,12 @@ static bool ordenarMayorMenor(const struct list_elem *a,
 /* Funcion auxiliar para ordenar la lista, comparara si la prioridad del lock 
 a es mayor a la de b, mayor prioridad en head */
 static bool ordenarMayorMenorLock(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux);
+
+/* Funcion auxiliar para ordenar la lista, comparara si la prioridad de la lista 
+del semaforo a es mayor a la de b, mayor prioridad en head */
+static bool ordenarMayorMenorSema(const struct list_elem *a,
                              const struct list_elem *b,
                              void *aux);
 
