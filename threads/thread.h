@@ -24,6 +24,17 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#define CORRIMIENTO 12
+#define ADD_X_N(X,N) ((X) + (N<<CORRIMIENTO))          // Add x and n:	x + n * f  
+#define MUL_X_N(X,N) ((X) * N)                         // Multiply x by n:	x * n
+#define DIV_X_N(X,N) ((X) / N)                         // Divide x by n:	x / n
+#define DIV_X_Y(X,Y) ((((int64_t)X)<<CORRIMIENTO)/(Y)) // Divide x by y:	((int64_t) x) * f / y
+#define MUL_X_Y(X,Y) (((int64_t)X)*(Y)>>CORRIMIENTO)   // Multiply x by y:	((int64_t) x) * y / f
+#define CONV_N(N) ((N)<<CORRIMIENTO)                   // Convert n to fixed point:	n * f
+#define SUB_X_Y(X,Y) ((X) - (Y))                       // Subtract y from x:	x - y
+                           /*  (x + f / 2) / f if x >= 0, (x - f / 2) / f if x <= 0 */
+#define ROUND_X(X) ((X)>=0 ? (((X)+(1<<(CORRIMIENTO-1)))>>CORRIMIENTO): (((X)-(1<<(CORRIMIENTO-1)))>>CORRIMIENTO) )  
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -99,6 +110,8 @@ struct thread
    struct lock *waiting_for_lock;     // El lock por el cual espera este thread
    struct list holding_lock;          // Los bloqueos que tiene este thread 
    
+   int64_t recent_cpu;                // Para advanced scheduller
+   int nice;                          // Para advanced scheduller
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -135,7 +148,7 @@ void thread_yield (void);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
-void thread_foreach (thread_action_func *, void *);
+void thread_foreach (thread_action_func *, void *); // Esta funcion aplica thread_action_func en todos los threads
 
 int thread_get_priority (void);
 void thread_set_priority (int);
@@ -155,4 +168,10 @@ static bool ordenarMayorMenor(const struct list_elem *a,
                              void *aux);
 
 void verificar(struct thread *t, int p);
+
+void actualizar_current_recent_cpu();
+void actualizar_load_avg();
+void actualizar_thread_recent_cpu(struct thread *t, void *aux);
+void actualizar_thread_priority(struct thread *t, void *aux);
+void ordernar_ready_list();
 #endif /* threads/thread.h */

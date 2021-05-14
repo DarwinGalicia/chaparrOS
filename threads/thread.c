@@ -23,7 +23,7 @@
 
 static struct list lista_espera;  //lista de los threads que están en espera de que se cumpla su tiempo de estar durmiendo.
 
-
+static int64_t load_avg = 0;      // para advanced scheduller
 
 
 /* List of processes in THREAD_READY state, that is, processes
@@ -105,6 +105,9 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  initial_thread->nice = 0;
+  initial_thread->recent_cpu = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -404,7 +407,12 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  enum intr_level old_level = intr_disable ();
+  thread_current()->nice = nice;
+  //Debemos actualizar la prioridad del thread
+  actualizar_thread_priority(thread_current(), NULL);
+  thread_yield(); // soltar el procesador para que entre un nuevo thread
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
@@ -412,23 +420,29 @@ int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  /* 
+    Devuelve 100 veces el promedio de carga del sistema actual, redondeado al número entero más cercano
+    Multiply x by n:	x * n 
+    Convert x to integer (rounding to nearest):	(x + f / 2) / f if x >= 0, (x - f / 2) / f if x <= 0.
+  */
+  return ROUND_X(MUL_X_N(load_avg,100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  /* 
+    Devuelve 100 veces el valor reciente_cpu del hilo actual , redondeado al número entero más cercano.
+  */
+  return ROUND_X(MUL_X_N(thread_current()->recent_cpu,100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -521,7 +535,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->waiting_for_lock = NULL; // Al iniciar el thread no espera por un lock
   list_init(&t->holding_lock); // Se inicializa la lista de los locks que tiene el thread
   t->magic = THREAD_MAGIC;
-
+  
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -652,14 +666,16 @@ void insertar_en_lista_espera(int64_t ticks){
 	Cambiar su estatus a THREAD_BLOCKED, y definir su tiempo de expiracion */
 	
 	struct thread *thread_actual = thread_current ();
-  thread_actual->TIEMPO_DORMIDO = timer_ticks() + ticks;
+  if(thread_actual != idle_thread){
+    thread_actual->TIEMPO_DORMIDO = timer_ticks() + ticks;
   
-  /*Donde TIEMPO_DORMIDO es el atributo de la estructura thread que usted
+    /*Donde TIEMPO_DORMIDO es el atributo de la estructura thread que usted
 	  definió como paso inicial*/
 	
-  list_push_back(&lista_espera, &thread_actual->elem);
-  thread_block();
-
+    list_push_back(&lista_espera, &thread_actual->elem);
+    thread_block();
+  }
+  
   //Habilitar interrupciones
 	intr_set_level (old_level);
 }
@@ -728,4 +744,71 @@ void verificar(struct thread *t, int p){
     }
   }
   
+}
+
+void actualizar_current_recent_cpu(){
+  /*
+    Add x and n:	x + n * f
+  */    
+  if (thread_current () != idle_thread){
+    thread_current()->recent_cpu = ADD_X_N(thread_current()->recent_cpu,1);
+  }  
+};
+
+void actualizar_load_avg(){
+
+  /* load_avg = (59/60)*load_avg + (1/60)*ready_threads */
+
+  int ready_threads = list_size(&ready_list);
+  if(thread_current() != idle_thread){
+    ready_threads = ready_threads + 1;
+  }
+
+  /*
+    Multiply x by n:	x * n
+    Add x and n:	x + n * f
+    Divide x by n:	x / n
+  */
+  load_avg = DIV_X_N(ADD_X_N(MUL_X_N(load_avg,59),ready_threads),60);
+}
+
+void actualizar_thread_recent_cpu(struct thread *t, void *aux){
+  if(t != idle_thread) {
+    /* recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice */
+    int64_t recent_cpu = t->recent_cpu;
+    int nice = t->nice;
+    /*
+      Multiply x by n:	x * n
+      Add x and n:	x + n * f
+      Divide x by y:	((int64_t) x) * f / y
+      Multiply x by y:	((int64_t) x) * y / f
+      Add x and n:	x + n * f
+    */
+    t->recent_cpu = ADD_X_N(MUL_X_Y(DIV_X_Y(MUL_X_N(load_avg,2),ADD_X_N(MUL_X_N(load_avg,2),1)),recent_cpu),nice);
+  }
+}
+
+void actualizar_thread_priority(struct thread *t, void *aux){
+  if(t != idle_thread) {
+    /* priority = PRI_MAX - (recent_cpu / 4) - (nice * 2). */
+    int64_t recent_cpu = t->recent_cpu;
+    int nice = t->nice;
+    /*
+      Convert n to fixed point:	n * f
+      Divide x by n:	x / n
+      Multiply x by n:	x * n
+      Add x and n:	x + n * f
+      Subtract y from x:	x - y
+    */
+  
+    int priority = ROUND_X(SUB_X_Y(CONV_N(PRI_MAX),ADD_X_N(DIV_X_N(recent_cpu,4),(nice*2))));
+    if(priority > PRI_MAX) priority = PRI_MAX;
+    if(priority < PRI_MIN) priority = PRI_MIN;
+    t->priority = priority;
+  }
+}
+
+void ordernar_ready_list ()
+{
+  list_sort(&ready_list, ordenarMayorMenor, NULL);
 }

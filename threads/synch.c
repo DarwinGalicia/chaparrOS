@@ -223,7 +223,7 @@ lock_acquire (struct lock *lock)
   }
 
   struct lock *lockActual = lock;
-  while(threadLock != NULL && threadActual->priority > threadLock->priority){
+  while(!thread_mlfqs && threadLock != NULL && threadActual->priority > threadLock->priority){
     // mientras la prioridad del thread actual sea mayor que la del thread que tiene el lock, donar
     threadLock->priority = threadActual->priority;
 
@@ -248,8 +248,10 @@ lock_acquire (struct lock *lock)
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 
-  lock->holder->waiting_for_lock = NULL;
-  list_insert_ordered(&(lock->holder->holding_lock), &(lock->elem_lock), ordenarMayorMenorLock, NULL);
+  if(!thread_mlfqs){
+    lock->holder->waiting_for_lock = NULL;
+    list_insert_ordered(&(lock->holder->holding_lock), &(lock->elem_lock), ordenarMayorMenorLock, NULL);
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -285,28 +287,30 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
-  // Al finalizar el lock, restaurar la prioridad
-  //struct thread *threadActual = thread_current();
-  //threadActual->priority = threadActual->priorityOriginal;
 
-  // Quitar el lock de la lista de locks
-  list_remove(&lock->elem_lock);
+  if(!thread_mlfqs){
+    // Al finalizar el lock, restaurar la prioridad
+    //struct thread *threadActual = thread_current();
+    //threadActual->priority = threadActual->priorityOriginal;
 
-  struct thread *threadActual = thread_current();
-  if(list_empty(&threadActual->holding_lock)){
-    threadActual->priority = threadActual->priorityOriginal;
-    // se agrega esta verificacion, para ceder el procesador
-    verificar(threadActual, threadActual->priority);
+    // Quitar el lock de la lista de locks
+    list_remove(&lock->elem_lock);
 
-  } else {
-    // se ordena la lista, para extraer el de mayor prioridad
-    list_sort(&(threadActual->holding_lock), ordenarMayorMenorLock, NULL);
-    struct lock *next_lock = list_entry(list_front(&(threadActual->holding_lock)), struct lock, elem_lock);
-    threadActual->priority = next_lock->priority;
-    // se agrega esta verificacion, para ceder el procesador
-      verificar(threadActual, next_lock->priority);
+    struct thread *threadActual = thread_current();
+    if(list_empty(&threadActual->holding_lock)){
+      threadActual->priority = threadActual->priorityOriginal;
+      // se agrega esta verificacion, para ceder el procesador
+      verificar(threadActual, threadActual->priority);
+
+    } else {
+      // se ordena la lista, para extraer el de mayor prioridad
+      list_sort(&(threadActual->holding_lock), ordenarMayorMenorLock, NULL);
+      struct lock *next_lock = list_entry(list_front(&(threadActual->holding_lock)), struct lock, elem_lock);
+      threadActual->priority = next_lock->priority;
+      // se agrega esta verificacion, para ceder el procesador
+        verificar(threadActual, next_lock->priority);
+    }
   }
-
 }
 
 /* Returns true if the current thread holds LOCK, false
