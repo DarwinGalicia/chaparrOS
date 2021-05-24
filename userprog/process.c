@@ -20,6 +20,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void argumentos(char *file_name, void** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -30,6 +31,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  char *ptr; // para mantener el contexto del string qu estamos tokenizando
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -37,6 +39,13 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+
+/*
+No desea que el hilo tenga el nombre de archivo sin formato. 
+En su lugar, desea que el nombre del hilo sea el nombre del ejecutable. 
+Deberá extraer el nombre del ejecutable de file_name y pasarlo en su lugar.
+*/
+  file_name = strtok_r((char*)file_name, " ", &ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -60,6 +69,9 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  // Despues de cargar el stack, ya tenemos esp saved stack pointer, pushamos argumentos
+  argumentos(file_name, &if_.esp); 
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -88,7 +100,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+ return -1;
 }
 
 /* Free the current process's resources. */
@@ -463,3 +475,75 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+static void argumentos(char *file_name, void** esp){
+  
+  char* tokens[50];
+  char* token;
+  char* ptr;
+
+  token = strtok_r(file_name, " ", &ptr);
+  int cntArg = 0;
+  while(token != NULL){
+    tokens[cntArg] = token;
+    cntArg++;
+    token = strtok_r(NULL, " ", &ptr);
+  }
+  
+  /*
+    Address	Name	Data	Type
+    0xbffffffc	argv[3][...]	bar\0	char[4]
+    0xbffffff8	argv[2][...]	foo\0	char[4]
+    0xbffffff5	argv[1][...]	-l\0	char[3]
+    0xbfffffed	argv[0][...]	/bin/ls\0	char[8]
+    0xbfffffec	word-align	0	uint8_t
+    0xbfffffe8	argv[4]	0	char *
+    0xbfffffe4	argv[3]	0xbffffffc	char *
+    0xbfffffe0	argv[2]	0xbffffff8	char *
+    0xbfffffdc	argv[1]	0xbffffff5	char *
+    0xbfffffd8	argv[0]	0xbfffffed	char *
+    0xbfffffd4	argv	0xbfffffd8	char **
+    0xbfffffd0	argc	4	int
+    0xbfffffcc	return address	0	void (*) ()  
+  */
+
+  int i = 0;
+  int t = 0;
+  int direcciones[cntArg];
+  for(i = 0; i < cntArg; i++){
+    t = strlen(tokens[i])+1;
+    *esp -= t; // cada que metemos algo al stack decrementamos
+    memcpy(*esp, tokens[i], t); // lo metemos al stack y memcpy se encarga de agregar \0
+    direcciones[i] = (int)*esp; // guardamos la direccion donde esta cada argumento
+  }
+
+  // alineamos en divisivilidad 4 - word, el binario termina en 00
+  // https://www.cs.umd.edu/~meesh/cmsc311/clin-cmsc311/Lectures/lecture6/alignment.pdf
+  // https://web.stanford.edu/~ouster/cgi-bin/cs140-spring20/pintos/pintos_3.html#SEC51
+  *esp = (int)*esp & 0xfffffffc;
+
+  *esp -= 4; //diminuimos luego de la alineacion
+  *(int*)*esp = 0; // parseamos y como es doble puntero, para darle valor 0, debemos ** ir a donde apunta
+
+  // ahora vamos a guardar las direcciones, en orden ascendente como dice la doc
+  for (i = cntArg - 1; i >= 0; i--) {
+    *esp -= 4; // ahora como ya estamos en word align, entonces decrementamos 4 bytes
+    *(int*)*esp = direcciones[i]; // como queremos apuntar a la memoria **, y parseamos
+  }
+
+  /*
+    Luego, push argv (la dirección de argv [0]) y argc, en ese orden. 
+    Finalmente, inserte una "dirección de retorno" falsa: aunque la función de entrada nunca regresará, 
+    su marco de pila debe tener la misma estructura que cualquier otro.
+  */
+  *esp -= 4;
+  *(int*)*esp = (int)*esp + 4;
+
+  //argc es la cantidad de argumentos
+  *esp -= 4;
+  *(int*)*esp = cntArg;
+
+  *esp-=4;
+  *(int*)*esp = 0;
+
+};
