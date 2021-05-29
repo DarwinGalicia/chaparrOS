@@ -48,10 +48,28 @@ process_execute (const char *file_name)
   */
   char *name = strtok_r((char*)fn_copy, " ", &ptr);
 
+  struct process_control_block *pcb = palloc_get_page(0);
+  pcb->pid = -2;
+  pcb->cmdline = fn_copy;
+  pcb->esperando = false;
+  pcb->terminado = false;
+  pcb->exit_code = -1;
+
+  sema_init(&pcb->inicializacion,0);
+  sema_init(&pcb->esperar,0);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (name, PRI_DEFAULT, start_process, ptr);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  tid = thread_create (name, PRI_DEFAULT, start_process, pcb);
+  if (tid == TID_ERROR){
+    palloc_free_page (fn_copy);
+    palloc_free_page (pcb);
+    return TID_ERROR;
+  }
+
+  sema_down(&pcb->inicializacion);
+
+  list_push_back(&(thread_current()->procesos), &(pcb->elem));
+
   return tid;
 }
 
@@ -60,7 +78,9 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
+  struct process_control_block *pcb = file_name_;
+  /* ahora recibe el pcb */
+  char *file_name = (char*)pcb->cmdline;
   struct intr_frame if_;
   bool success;
 
@@ -73,6 +93,13 @@ start_process (void *file_name_)
 
   // Despues de cargar el stack, ya tenemos esp saved stack pointer, pushamos argumentos
   argumentos(file_name, &if_.esp); 
+
+  struct thread *thread_actual = thread_current();
+  pcb->pid = success ? (tid_t)(thread_actual->tid) : -1;
+  thread_actual->pcb = pcb;
+
+  // para que continue process_execute
+  sema_up(&pcb->inicializacion);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -99,9 +126,39 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
- return -1;
+  struct thread *thread_actual = thread_current();
+  struct list *procesos = &(thread_actual->procesos);
+
+  struct process_control_block *child_pcb = NULL;
+  struct list_elem *e;
+  if(!list_empty(procesos)){
+    for (e = list_begin (procesos); e != list_end (&procesos); e = list_next (e))
+    {
+      struct process_control_block *pcb = list_entry(e, struct process_control_block, elem);
+      if(pcb->pid == child_tid){
+        child_pcb = pcb;
+        break;
+      }
+    }
+  }
+
+  if(child_pcb == NULL){
+    return -1;
+  } else {
+    child_pcb->esperando = true;
+  }
+  // si el proceso aun esta vivo, entonces usamos el semaforo
+  if(!child_pcb->terminado){
+    sema_down(&(child_pcb->esperar));
+  }
+  ASSERT(child_pcb->terminado == true);
+  ASSERT(e != NULL);
+  // una vez regrese se quita el proceso por el que hay que esperar y se regresa el
+  // codigo de salida de dicho proceso
+  list_remove(e);
+  return child_pcb->exit_code;
 }
 
 /* Free the current process's resources. */

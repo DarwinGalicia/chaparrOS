@@ -75,6 +75,10 @@ static struct descriptor* obtener_descriptor(int fd);
     Devuelve el tamaño, en bytes, del archivo abierto como fd.
 */
 int sys_filesize (int fd);
+/*
+    Espera un proceso pid secundario y recupera el estado de salida del subproceso.
+*/
+int sys_wait(tid_t pid);
 
 void
 syscall_init (void) 
@@ -217,8 +221,19 @@ syscall_handler (struct intr_frame *f UNUSED)
         f->eax = retorno;
         break;
       }
+    case SYS_WAIT:
+      {
+        tid_t pid;
+        if (get_user_bytes(f->esp + 4, &pid, sizeof(tid_t)) == -1){
+          sys_exit(-1);
+        }
+
+        int retorno = sys_wait(pid);
+        f->eax = retorno;
+        break;
+      }
     default:
-      thread_exit();
+      sys_exit(-1);
       break;
   }
 }
@@ -234,6 +249,15 @@ void sys_exit(int status){
     por printf ("%s: exit(%d)\n", ...);
   */
   printf("%s: exit(%d)\n", thread_current()->name, status);
+
+  struct process_control_block *pcb = thread_current()->pcb;
+  ASSERT(pcb != NULL);
+
+  pcb->terminado = true;
+  pcb->exit_code = status;
+  // incrementamos el semaforo, con esto el proceso padre, tambien podra terminar
+  sema_up(&pcb->esperar);
+  
   thread_exit();
 
 }
@@ -397,4 +421,8 @@ int sys_filesize(int fd) {
   }
 
   return file_length(descriptor->file);
+}
+
+int sys_wait(tid_t pid){
+  return process_wait(pid);
 }
