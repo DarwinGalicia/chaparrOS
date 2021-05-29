@@ -6,6 +6,7 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
+#include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -40,6 +41,19 @@ int sys_write(int fd, const void* buffer, unsigned size);
     devuelve el ID de programa (pid) del nuevo proceso, devuelve pid -1 de otro modo
 */
 tid_t sys_exec(const char* cmd_line);
+/*
+    Crea un nuevo archivo llamado file inicialmente initial_size bytes de tamaño. 
+    Devuelve verdadero si tiene éxito, falso en caso contrario. La creación de un nuevo
+    archivo no lo abre: abrir el nuevo archivo es una operación separada que requeriría 
+    una llamada al sistema sys_open.
+*/
+bool sys_create(const char *file, unsigned initial_size);
+/*
+    Elimina el archivo llamado file . Devuelve verdadero si tiene éxito, falso en caso 
+    contrario. Un archivo puede eliminarse independientemente de si está abierto o cerrado, 
+    y la eliminación de un archivo abierto no lo cierra.
+*/
+bool sys_remove(const char *file);
 
 void
 syscall_init (void) 
@@ -90,11 +104,11 @@ syscall_handler (struct intr_frame *f UNUSED)
           sys_exit(-1);
         }
 
-        if (get_user_bytes(f->esp + 8, &buffer, 4) == -1) {
+        if (get_user_bytes(f->esp + 8, &buffer, sizeof(buffer)) == -1) {
           sys_exit(-1);
         }
         
-        if (get_user_bytes(f->esp + 12, &size, 4) == -1) {
+        if (get_user_bytes(f->esp + 12, &size, sizeof(size)) == -1) {
           sys_exit(-1);
         }
 
@@ -117,6 +131,36 @@ syscall_handler (struct intr_frame *f UNUSED)
 
         tid_t pid = sys_exec((const char*)cmd_line);
         f->eax = (uint32_t)pid;
+        break;
+      }
+    case SYS_CREATE:
+      {
+        const char* filename;
+        unsigned initial_size;
+        
+        if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          sys_exit(-1);
+        }
+
+        if (get_user_bytes(f->esp + 8, &initial_size, sizeof(initial_size)) == -1) {
+          sys_exit(-1);
+        }
+
+        bool retorno = sys_create(filename, initial_size);
+        f->eax = retorno;
+
+        break;
+      }
+    case SYS_REMOVE:
+      {
+        const char* filename;
+            
+        if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          sys_exit(-1);
+        }
+
+        bool retorno = sys_remove(filename);
+        f->eax = retorno;
         break;
       }
     default:
@@ -192,3 +236,25 @@ tid_t sys_exec(const char* cmd_line){
 
   return process_execute(cmd_line);
 }
+
+bool sys_create(const char *file, unsigned initial_size){
+
+  /* Para las llamadas del sistema que requieran manejo de archivos vamos a usar filesys/filesys.h */
+
+  if(get_user((const uint8_t*)file) == -1){
+    sys_exit(-1);
+    return -1;
+  }
+
+  return filesys_create(file, initial_size);
+}
+
+bool sys_remove(const char *file){
+
+  if(get_user((const uint8_t*)file) == -1){
+    sys_exit(-1);
+    return -1;
+  }
+
+  return filesys_remove(file);
+} 
