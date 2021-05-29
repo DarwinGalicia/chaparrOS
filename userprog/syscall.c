@@ -7,6 +7,7 @@
 #include "userprog/process.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "lib/kernel/list.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -54,6 +55,26 @@ bool sys_create(const char *file, unsigned initial_size);
     y la eliminación de un archivo abierto no lo cierra.
 */
 bool sys_remove(const char *file);
+/*
+    Abre el archivo llamado file. Devuelve un identificador de entero no negativo llamado
+    "descriptor de archivo" (fd), o -1 si el archivo no se pudo abrir. Los descriptores de 
+    archivo numerados 0 y 1 están reservados para la consola: fd 0 (STDIN_FILENO) es la entrada 
+    estándar, fd 1 ( STDOUT_FILENO) es una salida estándar.
+*/
+int sys_open (const char *file);
+/*
+    Cierra el descriptor de archivo fd. Salir o terminar un proceso cierra implícitamente todos sus 
+    descriptores de archivos abiertos, como si llamara a esta función para cada uno.
+*/
+void sys_close(int fd);
+/*
+    Devuelve un descriptor de archivo dado su id, del thread actual
+*/
+static struct descriptor* obtener_descriptor(int fd);
+/*
+    Devuelve el tamaño, en bytes, del archivo abierto como fd.
+*/
+int sys_filesize (int fd);
 
 void
 syscall_init (void) 
@@ -163,6 +184,39 @@ syscall_handler (struct intr_frame *f UNUSED)
         f->eax = retorno;
         break;
       }
+    case SYS_OPEN:
+      {
+        const char* filename;
+            
+        if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          sys_exit(-1);
+        }
+
+        int retorno = sys_open(filename);
+        f->eax = retorno;
+        break;
+      }
+    case SYS_CLOSE:
+      {
+        int fd;
+        if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          sys_exit(-1);
+        }
+
+        sys_close(fd);
+        break;
+      }
+    case SYS_FILESIZE:
+      {
+        int fd;
+        if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          sys_exit(-1);
+        }
+
+        int retorno = sys_filesize(fd);
+        f->eax = retorno;
+        break;
+      }
     default:
       thread_exit();
       break;
@@ -258,3 +312,89 @@ bool sys_remove(const char *file){
 
   return filesys_remove(file);
 } 
+
+int sys_open(const char* file) {
+  struct file* file_opened;
+  struct descriptor* fd = palloc_get_page(0);
+
+  if (get_user((const uint8_t*)file) == -1) {
+    sys_exit(-1);
+    return -1;
+  }
+
+  file_opened = filesys_open(file);
+  if (!file_opened) {
+    return -1;
+  }
+
+  fd->file = file_opened;
+
+  // asignar id
+  // si la lista de descriptores esta vacia, el pimer id debe ser 3, pues 0,1 y 2 estan reservados
+  struct list* descriptores = &thread_current()->descriptores;
+  if (list_empty(descriptores)) {
+    fd->id = 3;
+  } else {
+    fd->id = (list_entry(list_back(descriptores), struct descriptor, elem)->id) + 1;
+  }
+  // insertar en la lista de descriptores
+  list_push_back(descriptores, &(fd->elem));
+
+  // regresar el id del descriptor
+  return fd->id;
+}
+
+void sys_close(int fd) {
+  struct descriptor* descriptor = obtener_descriptor(fd);
+
+  if (get_user((const uint8_t*)fd) == -1) {
+    sys_exit(-1);
+    return -1;
+  }
+
+  if(descriptor && descriptor->file) {
+    // llamamos a la funcion del file system
+    file_close(descriptor->file);
+    // quitamos el archivo del proceso
+    list_remove(&(descriptor->elem));
+    // liberamos recursos
+    palloc_free_page(descriptor);
+  }
+}
+
+static struct descriptor* obtener_descriptor(int fd){
+  if(fd<3){
+    return NULL;
+  }
+  struct thread* thread_actual = thread_current();
+
+  struct list_elem *e = list_begin(&thread_actual->descriptores); 
+  int i = 3; // la lista empieza con id desde 3
+  while(i<fd){
+    if(e == NULL){
+      // Si el primer elemento esta NULL, entonces no hay elementos
+      return NULL;
+    } else {
+      e = list_next (e);
+    }
+  }
+  // con la referencia al elemento obtenemos nuestra estructura
+  return list_entry(e, struct descriptor, elem);
+};
+
+int sys_filesize(int fd) {
+  struct descriptor* descriptor;
+
+  if (get_user((const uint8_t*)fd) == -1) {
+    sys_exit(-1);
+    return -1;
+  }
+
+  descriptor = obtener_descriptor(fd);
+
+  if(descriptor == NULL) {
+    return -1;
+  }
+
+  return file_length(descriptor->file);
+}

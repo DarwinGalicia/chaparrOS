@@ -534,6 +534,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priorityOriginal = priority;
   t->waiting_for_lock = NULL; // Al iniciar el thread no espera por un lock
   list_init(&t->holding_lock); // Se inicializa la lista de los locks que tiene el thread
+  #ifdef USERPROG
+    list_init(&t->descriptores);
+  #endif
   t->magic = THREAD_MAGIC;
   
   old_level = intr_disable ();
