@@ -8,6 +8,7 @@
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
 #include "lib/kernel/list.h"
+#include "filesys/file.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -85,6 +86,16 @@ int sys_wait(tid_t pid);
     distinta al final del archivo). Fd 0 lee desde el teclado usando input_getc ().  
 */
 int sys_read(int fd, void *buffer, unsigned size);
+/*
+    Cambia el siguiente byte a leer o escribir en el archivo abierto fd a la posición, expresada
+    en bytes desde el principio del archivo.
+*/
+void sys_seek(int fd, unsigned position);
+/*
+    Devuelve la posición del siguiente byte a leer o escribir en el archivo abierto fd, expresado
+    en bytes desde el principio del archivo.
+*/
+unsigned sys_tell(int fd);
 
 void
 syscall_init (void) 
@@ -255,6 +266,34 @@ syscall_handler (struct intr_frame *f UNUSED)
         f->eax = (uint32_t)retorno;
         break; 
       }
+    case SYS_SEEK:
+      {
+        int fd;
+        unsigned position;
+
+        if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          sys_exit(-1);
+        }
+
+        if (get_user_bytes(f->esp + 8, &position, sizeof(position)) == -1) {
+          sys_exit(-1);
+        }
+        
+        sys_seek(fd, position);
+        break; 
+      }
+    case SYS_TELL:
+      {
+        int fd;
+
+        if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          sys_exit(-1);
+        }
+        
+        unsigned retorno = sys_tell(fd);
+        f->eax = (uint32_t)retorno;
+        break;
+      }
     default:
       sys_exit(-1);
       break;
@@ -421,7 +460,7 @@ static struct descriptor* obtener_descriptor(int fd){
     return NULL;
   }
 
-  struct list *descriptores = &(t->descriptores);
+  struct list *descriptores = &t->descriptores;
   struct list_elem *e;
   if(!list_empty(descriptores)){
     for (e = list_begin (descriptores); e != list_end (descriptores); e = list_next (e))
@@ -479,5 +518,23 @@ int sys_read(int fd, void *buffer, unsigned size) {
     } else {
       return -1;
     }
+  }
+}
+
+void sys_seek (int fd, unsigned position){
+  struct descriptor *descriptor = obtener_descriptor(fd);
+
+  if(descriptor && descriptor->file){
+    file_seek(descriptor->file, position);
+  }
+}
+
+unsigned sys_tell(int fd){
+  struct descriptor *descriptor = obtener_descriptor(fd);
+
+  if(descriptor && descriptor->file) {
+    return file_tell(descriptor->file);
+  } else {
+    return -1;
   }
 }

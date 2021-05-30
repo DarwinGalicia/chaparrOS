@@ -70,7 +70,7 @@ process_execute (const char *file_name)
 
   list_push_back(&(thread_current()->procesos), &(pcb->elem));
 
-  return tid;
+  return pcb->pid;
 }
 
 /* A thread function that loads a user process and starts it
@@ -92,7 +92,7 @@ start_process (void *file_name_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   // Despues de cargar el stack, ya tenemos esp saved stack pointer, pushamos argumentos
-  argumentos(file_name, &if_.esp); 
+  if(success)argumentos(file_name, &if_.esp); 
 
   struct thread *thread_actual = thread_current();
   pcb->pid = success ? (tid_t)(thread_actual->tid) : -1;
@@ -167,6 +167,10 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  if(cur->ejecutable){
+    file_close(cur->ejecutable);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -378,11 +382,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  file_deny_write(file);
+  thread_current()->ejecutable = file;
   success = true;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);
   return success;
 }
 

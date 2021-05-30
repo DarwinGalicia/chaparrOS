@@ -120,6 +120,7 @@ struct thread
     struct list descriptores;
     struct process_control_block *pcb;
     struct list procesos;
+    struct file *ejecutable;           //El archivo ejecutable de asociado
 #endif
 
     /* Owned by thread.c. */
