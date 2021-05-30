@@ -21,6 +21,9 @@ struct process_control_block {
   int exit_code;      // indica el codigo con el termino el proceso
   struct semaphore inicializacion; 
   struct semaphore esperar; 
+  // en el caso que el padre no tenga que esperar por sus hijos, entonces el padre no 
+  // debe liberar los recursos de los hijos, en este caso el hijo se encargara de liberarlo
+  bool deboliberar;
 };
 
 tid_t process_execute (const char *file_name);

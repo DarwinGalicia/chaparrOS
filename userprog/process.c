@@ -66,6 +66,7 @@ process_execute (const char *file_name)
   pcb->esperando = false;
   pcb->terminado = false;
   pcb->exit_code = -1;
+  pcb->deboliberar = false;
 
   sema_init(&pcb->inicializacion,0);
   sema_init(&pcb->esperar,0);
@@ -213,7 +214,13 @@ process_exit (void)
   while (!list_empty(procesos)) {
     struct list_elem *e = list_pop_front (procesos);
     struct process_control_block *pcb = list_entry(e, struct process_control_block, elem);
-    palloc_free_page(pcb);
+    // si ya esta terminado se liberan los recursos
+    if(pcb->terminado == true){
+      palloc_free_page(pcb);
+    } else {
+    // si no, entonces set a la variable puedo liberar, para que se libere posterior al semaforo
+      pcb->deboliberar = true;
+    }
   }
 
   if(cur->ejecutable){
@@ -222,6 +229,9 @@ process_exit (void)
   }
 
   sema_up(&cur->pcb->esperando);
+  if(cur->pcb->deboliberar){
+    palloc_free_page(&cur->pcb);
+  }
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

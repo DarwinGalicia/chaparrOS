@@ -126,11 +126,13 @@ sema_up (struct semaphore *sema)
 
   // si el thread que se esta desbloqueando tiene prioridad mayor, al current thread, seder procesador
   sema->value++;
-  if(t_unblock != NULL){
-    if(t_unblock->priority > thread_current()->priority){
-      thread_yield();
+  #ifndef USERPROG
+    if(t_unblock != NULL){
+      if(t_unblock->priority > thread_current()->priority){
+        thread_yield();
+      }
     }
-  }
+  #endif
   intr_set_level (old_level);
 }
 
