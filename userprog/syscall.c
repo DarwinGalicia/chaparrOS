@@ -79,6 +79,12 @@ int sys_filesize (int fd);
     Espera un proceso pid secundario y recupera el estado de salida del subproceso.
 */
 int sys_wait(tid_t pid);
+/*
+    Lee size bytes del archivo abierto fd en el búfer. Devuelve el número de bytes realmente 
+    leídos (0 al final del archivo), o -1 si el archivo no se pudo leer (debido a una condición 
+    distinta al final del archivo). Fd 0 lee desde el teclado usando input_getc ().  
+*/
+int sys_read(int fd, void *buffer, unsigned size);
 
 void
 syscall_init (void) 
@@ -110,13 +116,12 @@ syscall_handler (struct intr_frame *f UNUSED)
         // int fd = *((int*)f->esp + 1); <--- esto es sin validar y como parsea a int +1 es 
         // equivalente a +4 sin parsear 4 bytes
 
-        int retorno = get_user_bytes(f->esp + 4, &status, sizeof(status));
-
-        if (retorno == -1) {
+        if(get_user_bytes(f->esp + 4, &status, sizeof(status)) == -1){
           sys_exit(-1);
-        } else {
-          sys_exit(status);
-        }
+        };
+
+        sys_exit(status);
+        
         break;
       }
     case SYS_WRITE:
@@ -138,11 +143,7 @@ syscall_handler (struct intr_frame *f UNUSED)
         }
 
         int retorno = sys_write(fd, buffer, size);
-        if(retorno == 0) {
-          thread_exit();
-        } else {
-          f->eax = (uint32_t)retorno; // indicamos cuantos bytes se escribieron
-        }
+        f->eax = (uint32_t)retorno;
         break; 
       }
     case SYS_EXEC:
@@ -232,6 +233,28 @@ syscall_handler (struct intr_frame *f UNUSED)
         f->eax = retorno;
         break;
       }
+    case SYS_READ:
+      {
+        int fd;
+        const void* buffer;
+        unsigned size;
+
+        if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          sys_exit(-1);
+        }
+
+        if (get_user_bytes(f->esp + 8, &buffer, sizeof(buffer)) == -1) {
+          sys_exit(-1);
+        }
+        
+        if (get_user_bytes(f->esp + 12, &size, sizeof(size)) == -1) {
+          sys_exit(-1);
+        }
+
+        int retorno = sys_read(fd, buffer, size);
+        f->eax = (uint32_t)retorno;
+        break; 
+      }
     default:
       sys_exit(-1);
       break;
@@ -266,7 +289,7 @@ static int get_user (const uint8_t *uaddr)
 {
   // obtuvimos esta funcion de https://web.stanford.edu/~ouster/cgi-bin/cs140-spring20/pintos/pintos_3.html#SEC44
   // Accessing User Memory
-  if((void*)uaddr < PHYS_BASE){
+  if(is_user_vaddr(uaddr)){
     int result;
     asm ("movl $1f, %0; movzbl %1, %0; 1:"
         : "=&a" (result) : "m" (*uaddr));
@@ -287,20 +310,27 @@ static int get_user_bytes (void *uaddr, void *dst, size_t bytes){
       *(char*)(dst + i) = valor & 0xff; // solo dejamos pasar el byte hacia dst
     }
   }
+  return (int)bytes;
 };
  
 int sys_write(int fd, const void* buffer, unsigned size){
   // validamos que no este accesando a memoria que no debe
   if(get_user((const uint8_t*)buffer) == -1){
-    thread_exit();
-    return 0;
+    sys_exit(-1);
   }
   //Todos nuestros programas de prueba escriben en la consola
   if(fd == 1){
     putbuf(buffer, size);
     return size;
-  } 
-  return 0;
+  } else {
+    // para escribir en un archivo
+    struct descriptor* descriptor = obtener_descriptor(fd);
+    if(descriptor && descriptor->file){
+      return file_write(descriptor->file, buffer, size);
+    } else {
+      return -1;
+    }
+  }
 };
 
 tid_t sys_exec(const char* cmd_line){
@@ -308,8 +338,7 @@ tid_t sys_exec(const char* cmd_line){
   // cmd_line es un puntero a donde esta el argumento, debemos verificar que sea
   // valida la direccion
   if(get_user((const uint8_t*)cmd_line) == -1) {
-    thread_exit();
-    return -1;
+    sys_exit(-1);
   }
 
   return process_execute(cmd_line);
@@ -321,7 +350,6 @@ bool sys_create(const char *file, unsigned initial_size){
 
   if(get_user((const uint8_t*)file) == -1){
     sys_exit(-1);
-    return -1;
   }
 
   return filesys_create(file, initial_size);
@@ -331,7 +359,6 @@ bool sys_remove(const char *file){
 
   if(get_user((const uint8_t*)file) == -1){
     sys_exit(-1);
-    return -1;
   }
 
   return filesys_remove(file);
@@ -343,7 +370,6 @@ int sys_open(const char* file) {
 
   if (get_user((const uint8_t*)file) == -1) {
     sys_exit(-1);
-    return -1;
   }
 
   file_opened = filesys_open(file);
@@ -373,7 +399,6 @@ void sys_close(int fd) {
 
   if (get_user((const uint8_t*)fd) == -1) {
     sys_exit(-1);
-    return -1;
   }
 
   if(descriptor && descriptor->file) {
@@ -387,31 +412,36 @@ void sys_close(int fd) {
 }
 
 static struct descriptor* obtener_descriptor(int fd){
+  
+  struct thread *t = thread_current();
+
+  ASSERT(t!=NULL);
+
   if(fd<3){
     return NULL;
   }
-  struct thread* thread_actual = thread_current();
 
-  struct list_elem *e = list_begin(&thread_actual->descriptores); 
-  int i = 3; // la lista empieza con id desde 3
-  while(i<fd){
-    if(e == NULL){
-      // Si el primer elemento esta NULL, entonces no hay elementos
-      return NULL;
-    } else {
-      e = list_next (e);
+  struct list *descriptores = &(t->descriptores);
+  struct list_elem *e;
+  if(!list_empty(descriptores)){
+    for (e = list_begin (descriptores); e != list_end (descriptores); e = list_next (e))
+    {
+      struct descriptor *descriptor = list_entry(e,struct descriptor, elem);
+      if(descriptor->id == fd){
+        return descriptor;
+      }
     }
-  }
-  // con la referencia al elemento obtenemos nuestra estructura
-  return list_entry(e, struct descriptor, elem);
-};
+  }  
+  
+  // si llega hasta aqui entonces no hay un elemento relacionado
+  return NULL;
+}
 
 int sys_filesize(int fd) {
   struct descriptor* descriptor;
 
   if (get_user((const uint8_t*)fd) == -1) {
     sys_exit(-1);
-    return -1;
   }
 
   descriptor = obtener_descriptor(fd);
@@ -425,4 +455,29 @@ int sys_filesize(int fd) {
 
 int sys_wait(tid_t pid){
   return process_wait(pid);
+}
+
+int sys_read(int fd, void *buffer, unsigned size) {
+
+  if (get_user((const uint8_t*) buffer) == -1) {
+    sys_exit(-1);
+  }
+
+  if(fd == 0) { 
+    // fd 0 lee desde el teclado usando input_getc ()
+    unsigned i;
+    for(i = 0; i < size; ++i) {
+      ((uint8_t *)buffer)[i] = input_getc();
+    }
+    return size;
+  } else {
+    // leer desde un archivo 
+    struct descriptor* descriptor = obtener_descriptor(fd);
+
+    if(descriptor && descriptor->file) {
+      return file_read(descriptor->file, buffer, size);
+    } else {
+      return -1;
+    }
+  }
 }
