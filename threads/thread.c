@@ -536,6 +536,8 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->holding_lock); // Se inicializa la lista de los locks que tiene el thread
   #ifdef USERPROG
     list_init(&t->descriptores);
+    list_init(&t->procesos);
+    t->pcb = NULL;
   #endif
   t->magic = THREAD_MAGIC;
   

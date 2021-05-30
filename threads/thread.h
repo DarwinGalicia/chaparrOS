@@ -118,6 +118,8 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     /*Cada proceso tiene un conjunto independiente de descriptores de archivo.*/
     struct list descriptores;
+    struct process_control_block *pcb;
+    struct list procesos;
 #endif
 
     /* Owned by thread.c. */
