@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -29,15 +30,17 @@ static void argumentos(char *file_name, void** esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  char *fn_copy = NULL, *name = NULL;
   tid_t tid;
-  char *ptr; // para mantener el contexto del string qu estamos tokenizando
-
+  char *ptr = NULL; // para mantener el contexto del string qu estamos tokenizando
+  struct process_control_block *pcb = NULL;
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
+  if (fn_copy == NULL) {
+    goto error;
+  }
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /*
@@ -46,9 +49,18 @@ process_execute (const char *file_name)
   ejecutable. Deberá extraer el nombre del ejecutable de file_name
   y pasarlo en su lugar.
   */
-  char *name = strtok_r((char*)fn_copy, " ", &ptr);
+  name = palloc_get_page(0);
+  if(name == NULL){
+    goto error;
+  }
+  strlcpy(name, file_name, PGSIZE);
+  name = strtok_r(name, " ", &ptr);
 
-  struct process_control_block *pcb = palloc_get_page(0);
+  // aqui es donde asignamos y setamos nuestro pcb
+  pcb = palloc_get_page(0);
+  if(pcb == NULL){
+    goto error;
+  }
   pcb->pid = -2;
   pcb->cmdline = fn_copy;
   pcb->esperando = false;
@@ -61,16 +73,31 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (name, PRI_DEFAULT, start_process, pcb);
   if (tid == TID_ERROR){
-    palloc_free_page (fn_copy);
-    palloc_free_page (pcb);
-    return TID_ERROR;
+    goto error;
   }
 
   sema_down(&pcb->inicializacion);
+  if(fn_copy){
+    palloc_free_page(fn_copy);
+  }
 
-  list_push_back(&(thread_current()->procesos), &(pcb->elem));
-
+  if(pcb->pid >= 0)list_push_back(&(thread_current()->procesos), &(pcb->elem));
+  if(name){
+    palloc_free_page(name);
+  }
   return pcb->pid;
+
+error:
+  if(fn_copy){
+    palloc_free_page(fn_copy);
+  }
+  if(name){
+    palloc_free_page(name);
+  }
+  if(pcb){
+    palloc_free_page(pcb);
+  }
+  return TID_ERROR;
 }
 
 /* A thread function that loads a user process and starts it
@@ -82,7 +109,7 @@ start_process (void *file_name_)
   /* ahora recibe el pcb */
   char *file_name = (char*)pcb->cmdline;
   struct intr_frame if_;
-  bool success;
+  bool success = false;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -95,16 +122,15 @@ start_process (void *file_name_)
   if(success)argumentos(file_name, &if_.esp); 
 
   struct thread *thread_actual = thread_current();
-  pcb->pid = success ? (tid_t)(thread_actual->tid) : -1;
+  pcb->pid == success ? (tid_t)(thread_actual->tid) : -1;
   thread_actual->pcb = pcb;
 
   // para que continue process_execute
   sema_up(&pcb->inicializacion);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
+    sys_exit(-1);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -158,7 +184,11 @@ process_wait (tid_t child_tid)
   // una vez regrese se quita el proceso por el que hay que esperar y se regresa el
   // codigo de salida de dicho proceso
   list_remove(e);
-  return child_pcb->exit_code;
+  int status = child_pcb->exit_code;
+  if(child_pcb){
+    palloc_free_page(child_pcb);
+  }
+  return status;
 }
 
 /* Free the current process's resources. */
@@ -168,10 +198,30 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  /* Salir o terminar un proceso cierra implícitamente todos sus descriptores de archivos abiertos,
+   como si llamara a la función close para cada uno. */
+  struct list *descriptores = &cur->descriptores;
+  while(!list_empty(descriptores)){
+    struct list_elem *e = list_pop_front(descriptores);
+    struct descriptor *descriptor = list_entry(e, struct descriptor, elem);
+    file_close(descriptor->file);
+    palloc_free_page(descriptor);
+  }
+
+  /* se liberan los recursos de pcb para cad subproceso */
+  struct list *procesos = &cur->procesos;
+  while (!list_empty(procesos)) {
+    struct list_elem *e = list_pop_front (procesos);
+    struct process_control_block *pcb = list_entry(e, struct process_control_block, elem);
+    palloc_free_page(pcb);
+  }
+
   if(cur->ejecutable){
+    file_allow_write(cur->ejecutable); // al terminar se tiene que volver a permitir escribir en el archivo
     file_close(cur->ejecutable);
   }
 
+  sema_up(&cur->pcb->esperando);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

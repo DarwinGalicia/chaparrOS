@@ -28,12 +28,7 @@ static int get_user_bytes (void *uaddr, void *dst, size_t bytes);
     Esto debería usarse pocas veces, porque pierde información sobre posibles situaciones de interbloqueo, etc.
 */
 void sys_halt(void);
-/*
-    Termina el programa de usuario actual, devolviendo el estado al kernel. Si el padre del proceso 
-    lo espera (ver más abajo), este es el estado que se devolverá. Convencionalmente, un estado de 0
-    indica éxito y los valores distintos de cero indican errores.
-*/
-void sys_exit(int);
+
 /*
     Escribe size bytes desde el búfer al archivo abierto fd.
 */
@@ -96,6 +91,10 @@ void sys_seek(int fd, unsigned position);
     en bytes desde el principio del archivo.
 */
 unsigned sys_tell(int fd);
+/* Escribe BYTE en la dirección de usuario UDST.
+   UDST debe estar por debajo de PHYS_BASE.
+   Devuelve verdadero si tiene éxito, falso si ocurrió una falla de segmento */
+static bool put_user(uint8_t *udst, uint8_t byte);
 
 void
 syscall_init (void) 
@@ -313,15 +312,11 @@ void sys_exit(int status){
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
   struct process_control_block *pcb = thread_current()->pcb;
-  ASSERT(pcb != NULL);
-
-  pcb->terminado = true;
-  pcb->exit_code = status;
-  // incrementamos el semaforo, con esto el proceso padre, tambien podra terminar
-  sema_up(&pcb->esperar);
-  
+  if(pcb != NULL){
+    pcb->terminado = true;
+    pcb->exit_code = status;
+  }
   thread_exit();
-
 }
 
 static int get_user (const uint8_t *uaddr)
@@ -355,6 +350,10 @@ static int get_user_bytes (void *uaddr, void *dst, size_t bytes){
 int sys_write(int fd, const void* buffer, unsigned size){
   // validamos que no este accesando a memoria que no debe
   if(get_user((const uint8_t*)buffer) == -1){
+    sys_exit(-1);
+  }
+  // final del archivo
+  if(get_user((const uint8_t*)buffer + size -1) == -1){
     sys_exit(-1);
   }
   //Todos nuestros programas de prueba escriben en la consola
@@ -413,6 +412,7 @@ int sys_open(const char* file) {
 
   file_opened = filesys_open(file);
   if (!file_opened) {
+    palloc_free_page(fd);
     return -1;
   }
 
@@ -502,11 +502,17 @@ int sys_read(int fd, void *buffer, unsigned size) {
     sys_exit(-1);
   }
 
+  if (get_user((const uint8_t*) buffer + size -1) == -1) {
+    sys_exit(-1);
+  }
+
   if(fd == 0) { 
     // fd 0 lee desde el teclado usando input_getc ()
     unsigned i;
     for(i = 0; i < size; ++i) {
-      ((uint8_t *)buffer)[i] = input_getc();
+      if(!put_user(buffer + i, input_getc())){
+        sys_exit(-1);
+      };
     }
     return size;
   } else {
@@ -537,4 +543,16 @@ unsigned sys_tell(int fd){
   } else {
     return -1;
   }
+}
+
+static bool put_user(uint8_t *udst, uint8_t byte)
+{
+  if(is_user_vaddr(udst)){
+    int error_code;
+    asm ("movl $1f, %0; movb %b2, %1; 1:"
+       : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+    return error_code != -1;
+  } else {
+    return false;
+  }  
 }
