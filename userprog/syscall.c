@@ -9,6 +9,8 @@
 #include "filesys/filesys.h"
 #include "lib/kernel/list.h"
 #include "filesys/file.h"
+#include "threads/synch.h"
+#include "devices/input.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -96,9 +98,12 @@ unsigned sys_tell(int fd);
    Devuelve verdadero si tiene éxito, falso si ocurrió una falla de segmento */
 static bool put_user(uint8_t *udst, uint8_t byte);
 
+struct lock archivos;
+
 void
 syscall_init (void) 
 {
+  lock_init(&archivos);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -106,8 +111,12 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   int sys_code;
+  ASSERT( sizeof(sys_code) == 4 );
   // validar que sea un puntero valido
   if (get_user_bytes(f->esp, &sys_code, sizeof(sys_code)) == -1) {
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }    
     sys_exit(-1);
   }
 
@@ -127,6 +136,9 @@ syscall_handler (struct intr_frame *f UNUSED)
         // equivalente a +4 sin parsear 4 bytes
 
         if(get_user_bytes(f->esp + 4, &status, sizeof(status)) == -1){
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         };
 
@@ -141,14 +153,23 @@ syscall_handler (struct intr_frame *f UNUSED)
         unsigned size;
 
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
         if (get_user_bytes(f->esp + 8, &buffer, sizeof(buffer)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
         
         if (get_user_bytes(f->esp + 12, &size, sizeof(size)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -162,11 +183,14 @@ syscall_handler (struct intr_frame *f UNUSED)
 
         int retorno = get_user_bytes(f->esp + 4, &cmd_line, sizeof(cmd_line));
         if(retorno == -1){
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
-        tid_t pid = sys_exec((const char*)cmd_line);
-        f->eax = (uint32_t)pid;
+        retorno = sys_exec((const char*)cmd_line);
+        f->eax = (uint32_t)retorno;
         break;
       }
     case SYS_CREATE:
@@ -175,10 +199,16 @@ syscall_handler (struct intr_frame *f UNUSED)
         unsigned initial_size;
         
         if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
         if (get_user_bytes(f->esp + 8, &initial_size, sizeof(initial_size)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -192,6 +222,9 @@ syscall_handler (struct intr_frame *f UNUSED)
         const char* filename;
             
         if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -204,6 +237,9 @@ syscall_handler (struct intr_frame *f UNUSED)
         const char* filename;
             
         if (get_user_bytes(f->esp + 4, &filename, sizeof(filename)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -215,6 +251,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       {
         int fd;
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -225,6 +264,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       {
         int fd;
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -236,6 +278,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       {
         tid_t pid;
         if (get_user_bytes(f->esp + 4, &pid, sizeof(tid_t)) == -1){
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -246,18 +291,27 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_READ:
       {
         int fd;
-        const void* buffer;
+        void* buffer;
         unsigned size;
 
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
         if (get_user_bytes(f->esp + 8, &buffer, sizeof(buffer)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
         
         if (get_user_bytes(f->esp + 12, &size, sizeof(size)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
@@ -271,10 +325,16 @@ syscall_handler (struct intr_frame *f UNUSED)
         unsigned position;
 
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
 
         if (get_user_bytes(f->esp + 8, &position, sizeof(position)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
         
@@ -286,6 +346,9 @@ syscall_handler (struct intr_frame *f UNUSED)
         int fd;
 
         if (get_user_bytes(f->esp + 4, &fd, sizeof(fd)) == -1) {
+          if (lock_held_by_current_thread(&archivos)){
+            lock_release (&archivos);
+          }  
           sys_exit(-1);
         }
         
@@ -294,6 +357,7 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     default:
+      printf("[ERROR] system call %d is unimplemented!\n", sys_code);
       sys_exit(-1);
       break;
   }
@@ -315,7 +379,7 @@ void sys_exit(int status){
   if(pcb != NULL){
     pcb->terminado = true;
     pcb->exit_code = status;
-  }
+  } 
   thread_exit();
 }
 
@@ -323,7 +387,7 @@ static int get_user (const uint8_t *uaddr)
 {
   // obtuvimos esta funcion de https://web.stanford.edu/~ouster/cgi-bin/cs140-spring20/pintos/pintos_3.html#SEC44
   // Accessing User Memory
-  if(is_user_vaddr(uaddr)){
+  if(((void*)uaddr < PHYS_BASE)){
     int result;
     asm ("movl $1f, %0; movzbl %1, %0; 1:"
         : "=&a" (result) : "m" (*uaddr));
@@ -350,26 +414,36 @@ static int get_user_bytes (void *uaddr, void *dst, size_t bytes){
 int sys_write(int fd, const void* buffer, unsigned size){
   // validamos que no este accesando a memoria que no debe
   if(get_user((const uint8_t*)buffer) == -1){
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
   // final del archivo
-  if(get_user((const uint8_t*)buffer + size -1) == -1){
+  if(get_user((const uint8_t*)(buffer + size -1)) == -1){
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
+  lock_acquire(&archivos);
+  int retorno = 0;
   //Todos nuestros programas de prueba escriben en la consola
   if(fd == 1){
     putbuf(buffer, size);
-    return size;
+    retorno = size;
   } else {
     // para escribir en un archivo
     struct descriptor* descriptor = obtener_descriptor(fd);
     if(descriptor && descriptor->file){
-      return file_write(descriptor->file, buffer, size);
+      retorno = file_write(descriptor->file, buffer, size);
     } else {
-      return -1;
+      retorno = -1;
     }
   }
-};
+  lock_release(&archivos);
+  return retorno;
+}
 
 tid_t sys_exec(const char* cmd_line){
   
@@ -378,8 +452,11 @@ tid_t sys_exec(const char* cmd_line){
   if(get_user((const uint8_t*)cmd_line) == -1) {
     sys_exit(-1);
   }
+  lock_acquire(&archivos);
+  tid_t pid = process_execute(cmd_line);
+  lock_release(&archivos);
 
-  return process_execute(cmd_line);
+  return pid;
 }
 
 bool sys_create(const char *file, unsigned initial_size){
@@ -387,32 +464,49 @@ bool sys_create(const char *file, unsigned initial_size){
   /* Para las llamadas del sistema que requieran manejo de archivos vamos a usar filesys/filesys.h */
 
   if(get_user((const uint8_t*)file) == -1){
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
-
-  return filesys_create(file, initial_size);
+  lock_acquire(&archivos);
+  bool retorno = filesys_create(file, initial_size);
+  lock_release(&archivos);
+  return retorno;
 }
 
 bool sys_remove(const char *file){
 
   if(get_user((const uint8_t*)file) == -1){
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
-
-  return filesys_remove(file);
+  lock_acquire(&archivos);
+  bool retorno = filesys_remove(file);
+  lock_release(&archivos);
+  return retorno;
 } 
 
 int sys_open(const char* file) {
-  struct file* file_opened;
-  struct descriptor* fd = palloc_get_page(0);
-
   if (get_user((const uint8_t*)file) == -1) {
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
+  struct file* file_opened;
+  struct descriptor* fd = palloc_get_page(0);
+  if(!fd){
+    return -1;
+  }
 
+  lock_acquire(&archivos);
   file_opened = filesys_open(file);
   if (!file_opened) {
     palloc_free_page(fd);
+    lock_release(&archivos);
     return -1;
   }
 
@@ -430,15 +524,14 @@ int sys_open(const char* file) {
   list_push_back(descriptores, &(fd->elem));
 
   // regresar el id del descriptor
+  lock_release(&archivos);
   return fd->id;
 }
 
 void sys_close(int fd) {
-  struct descriptor* descriptor = obtener_descriptor(fd);
+  lock_acquire(&archivos);
 
-  if (get_user((const uint8_t*)fd) == -1) {
-    sys_exit(-1);
-  }
+  struct descriptor* descriptor = obtener_descriptor(fd);
 
   if(descriptor && descriptor->file) {
     // llamamos a la funcion del file system
@@ -448,6 +541,7 @@ void sys_close(int fd) {
     // liberamos recursos
     palloc_free_page(descriptor);
   }
+  lock_release(&archivos);
 }
 
 static struct descriptor* obtener_descriptor(int fd){
@@ -480,16 +574,26 @@ int sys_filesize(int fd) {
   struct descriptor* descriptor;
 
   if (get_user((const uint8_t*)fd) == -1) {
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
+
+  lock_acquire(&archivos);
 
   descriptor = obtener_descriptor(fd);
 
   if(descriptor == NULL) {
+    lock_release(&archivos);
     return -1;
   }
 
-  return file_length(descriptor->file);
+  int retorno = file_length(descriptor->file);
+
+  lock_release(&archivos);
+
+  return retorno;
 }
 
 int sys_wait(tid_t pid){
@@ -499,55 +603,78 @@ int sys_wait(tid_t pid){
 int sys_read(int fd, void *buffer, unsigned size) {
 
   if (get_user((const uint8_t*) buffer) == -1) {
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
   }
 
-  if (get_user((const uint8_t*) buffer + size -1) == -1) {
+  if (get_user((const uint8_t*) (buffer + size -1)) == -1) {
+    if (lock_held_by_current_thread(&archivos)){
+      lock_release (&archivos);
+    }  
     sys_exit(-1);
-  }
+  } 
 
-  if(fd == 0) { 
+  lock_acquire(&archivos);
+  int retorno = 0;
+  if(fd == 1){
+    retorno -1;
+  } else if(fd == 0) { 
     // fd 0 lee desde el teclado usando input_getc ()
-    unsigned i;
-    for(i = 0; i < size; ++i) {
-      if(!put_user(buffer + i, input_getc())){
-        sys_exit(-1);
-      };
-    }
-    return size;
+    uint8_t c;
+    unsigned counter = size;
+    uint8_t *buf = buffer;
+    while (counter > 1 && (c = input_getc()) != 0)
+      {
+        *buf = c;
+        buffer++;
+        counter--; 
+      }
+    *buf = 0;
+    retorno = size - counter;
   } else {
     // leer desde un archivo 
     struct descriptor* descriptor = obtener_descriptor(fd);
 
     if(descriptor && descriptor->file) {
-      return file_read(descriptor->file, buffer, size);
+      retorno = file_read(descriptor->file, buffer, size);
     } else {
-      return -1;
+      retorno = -1;
     }
   }
+  lock_release(&archivos);
+  return retorno;
 }
 
 void sys_seek (int fd, unsigned position){
+  lock_acquire(&archivos);
   struct descriptor *descriptor = obtener_descriptor(fd);
 
   if(descriptor && descriptor->file){
     file_seek(descriptor->file, position);
+  } else {
+    return;
   }
+  lock_release(&archivos);
 }
 
 unsigned sys_tell(int fd){
+  lock_acquire(&archivos);
   struct descriptor *descriptor = obtener_descriptor(fd);
-
+  int retorno;
   if(descriptor && descriptor->file) {
-    return file_tell(descriptor->file);
+    retorno = file_tell(descriptor->file);
   } else {
-    return -1;
+    retorno = -1;
   }
+  lock_release(&archivos);
+  return retorno;
 }
 
 static bool put_user(uint8_t *udst, uint8_t byte)
 {
-  if(is_user_vaddr(udst)){
+  if(((void*)udst < PHYS_BASE)){
     int error_code;
     asm ("movl $1f, %0; movb %b2, %1; 1:"
        : "=&a" (error_code), "=m" (*udst) : "q" (byte));

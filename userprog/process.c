@@ -21,7 +21,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static void argumentos(char *file_name, void** esp);
+static void argumentos(const char *tokens[], int cntArg, void** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -82,10 +82,11 @@ process_execute (const char *file_name)
     palloc_free_page(fn_copy);
   }
 
-  if(pcb->pid >= 0)list_push_back(&(thread_current()->procesos), &(pcb->elem));
-  if(name){
-    palloc_free_page(name);
+  if(pcb->pid >= 0) {
+    list_push_back(&(thread_current()->procesos), &(pcb->elem));
   }
+  palloc_free_page(name);
+  
   return pcb->pid;
 
 error:
@@ -111,6 +112,24 @@ start_process (void *file_name_)
   char *file_name = (char*)pcb->cmdline;
   struct intr_frame if_;
   bool success = false;
+  const char **tokens = NULL;
+  struct thread *thread_actual = thread_current();
+
+  tokens = (const char**)palloc_get_page (0);
+  if (tokens == NULL) {
+    printf("[Error] Kernel Error: Not enough memory\n");
+    goto finalizar;
+  }
+  char* token;
+  char* ptr;
+
+  token = strtok_r(file_name, " ", &ptr);
+  int cntArg = 0;
+  while(token != NULL){
+    tokens[cntArg] = token;
+    cntArg++;
+    token = strtok_r(NULL, " ", &ptr);
+  }
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -118,12 +137,14 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  
   // Despues de cargar el stack, ya tenemos esp saved stack pointer, pushamos argumentos
-  if(success)argumentos(file_name, &if_.esp); 
+  if(success) {
+    argumentos(tokens, cntArg, &if_.esp);
+  } 
 
-  struct thread *thread_actual = thread_current();
-  pcb->pid == success ? (tid_t)(thread_actual->tid) : -1;
+finalizar:
+  pcb->pid = success ? (tid_t)(thread_actual->tid) : -1;
   thread_actual->pcb = pcb;
 
   // para que continue process_execute
@@ -161,7 +182,7 @@ process_wait (tid_t child_tid)
   struct process_control_block *child_pcb = NULL;
   struct list_elem *e;
   if(!list_empty(procesos)){
-    for (e = list_begin (procesos); e != list_end (&procesos); e = list_next (e))
+    for (e = list_front(procesos); e != list_end (&procesos); e = list_next (e))
     {
       struct process_control_block *pcb = list_entry(e, struct process_control_block, elem);
       if(pcb->pid == child_tid){
@@ -172,6 +193,10 @@ process_wait (tid_t child_tid)
   }
 
   if(child_pcb == NULL){
+    return -1;
+  } 
+  
+  if (child_pcb->esperando) {
     return -1;
   } else {
     child_pcb->esperando = true;
@@ -186,9 +211,8 @@ process_wait (tid_t child_tid)
   // codigo de salida de dicho proceso
   list_remove(e);
   int status = child_pcb->exit_code;
-  if(child_pcb){
-    palloc_free_page(child_pcb);
-  }
+  palloc_free_page(child_pcb);
+
   return status;
 }
 
@@ -228,7 +252,7 @@ process_exit (void)
     file_close(cur->ejecutable);
   }
 
-  sema_up(&cur->pcb->esperando);
+  sema_up(&cur->pcb->esperar);
   if(cur->pcb->deboliberar){
     palloc_free_page(&cur->pcb);
   }
@@ -600,20 +624,10 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-static void argumentos(char *file_name, void** esp){
+static void argumentos(const char *tokens[], int cntArg, void** esp){
   
-  char* tokens[50];
-  char* token;
-  char* ptr;
-
-  token = strtok_r(file_name, " ", &ptr);
-  int cntArg = 0;
-  while(token != NULL){
-    tokens[cntArg] = token;
-    cntArg++;
-    token = strtok_r(NULL, " ", &ptr);
-  }
-  
+   
+  ASSERT(cntArg >= 0);
   /*
     Address	Name	Data	Type
     0xbffffffc	argv[3][...]	bar\0	char[4]
@@ -633,26 +647,26 @@ static void argumentos(char *file_name, void** esp){
 
   int i = 0;
   int t = 0;
-  int direcciones[cntArg];
+  void* direcciones[cntArg];
   for(i = 0; i < cntArg; i++){
     t = strlen(tokens[i])+1;
     *esp -= t; // cada que metemos algo al stack decrementamos
     memcpy(*esp, tokens[i], t); // lo metemos al stack y memcpy se encarga de agregar \0
-    direcciones[i] = (int)*esp; // guardamos la direccion donde esta cada argumento
+    direcciones[i] = *esp; // guardamos la direccion donde esta cada argumento
   }
 
   // alineamos en divisivilidad 4 - word, el binario termina en 00
   // https://www.cs.umd.edu/~meesh/cmsc311/clin-cmsc311/Lectures/lecture6/alignment.pdf
   // https://web.stanford.edu/~ouster/cgi-bin/cs140-spring20/pintos/pintos_3.html#SEC51
-  *esp = (int)*esp & 0xfffffffc;
+  *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
 
   *esp -= 4; //diminuimos luego de la alineacion
-  *(int*)*esp = 0; // parseamos y como es doble puntero, para darle valor 0, debemos ** ir a donde apunta
+  *((uint32_t*) *esp) = 0; // parseamos y como es doble puntero, para darle valor 0, debemos ** ir a donde apunta
 
   // ahora vamos a guardar las direcciones, en orden ascendente como dice la doc
   for (i = cntArg - 1; i >= 0; i--) {
     *esp -= 4; // ahora como ya estamos en word align, entonces decrementamos 4 bytes
-    *(int*)*esp = direcciones[i]; // como queremos apuntar a la memoria **, y parseamos
+    *((void**) *esp) = direcciones[i]; // como queremos apuntar a la memoria **, y parseamos
   }
 
   /*
@@ -661,13 +675,13 @@ static void argumentos(char *file_name, void** esp){
     su marco de pila debe tener la misma estructura que cualquier otro.
   */
   *esp -= 4;
-  *(int*)*esp = (int)*esp + 4;
+  *((void**) *esp) = (*esp + 4);
 
   //argc es la cantidad de argumentos
   *esp -= 4;
-  *(int*)*esp = cntArg;
+  *((int*) *esp) = cntArg;
 
   *esp-=4;
-  *(int*)*esp = 0;
+  *((int*) *esp) = 0;
 
 };

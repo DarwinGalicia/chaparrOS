@@ -311,6 +311,14 @@ thread_exit (void)
   process_exit ();
 #endif
 
+  struct thread *thread_actual = thread_current();
+
+  struct list_elem *e;
+  for(e = list_begin(&thread_actual->holding_lock); e != list_end(&thread_actual->holding_lock); e = list_next(e)){
+    struct lock *lock = list_entry(e, struct lock, elem_lock);
+    lock_release(lock);
+  }
+
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
@@ -538,6 +546,7 @@ init_thread (struct thread *t, const char *name, int priority)
     list_init(&t->descriptores);
     list_init(&t->procesos);
     t->pcb = NULL;
+    t->ejecutable = NULL;
   #endif
   t->magic = THREAD_MAGIC;
   
